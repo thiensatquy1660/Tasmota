@@ -30,47 +30,51 @@
 
 #define XDRV_123               123            // unique driver ID
 
-// Default configurable TX/RX pins (can be overridden at compile-time)
-#ifndef RS485_TX_PIN
-  #define RS485_TX_PIN    1      // Default TX = GPIO1 (D1)
-#endif
-
-#ifndef RS485_RX_PIN
-  #define RS485_RX_PIN    3      // Default RX = GPIO3 (D3)
-#endif
-
 /*********************************************************************************************
  *  Local helpers
+ *  ----------------
+ *  Use the core Tasmota declarations for Pin(), AddLog(), LOG_LEVEL_*, PSTR(), etc.
  *********************************************************************************************/
 
-// Forward declarations (implemented inside xsns_83_neopool.ino)
-extern void NeoPoolInit(uint8_t tx_pin, uint8_t rx_pin);   // sensor initialisation
+// Forward declarations (implemented inside xsns_83_neopool.ino) (implemented inside xsns_83_neopool.ino)
+extern void NeoPoolInit(void);                 // sensor initialisation
 extern void NeoPoolPoll(void);                 // called every 250 ms to drive state-machine
-extern bool NeopoolMqttShow(bool json);        // JSON export
-extern uint32_t CmndNeopoolExec(void);         // console command dispatcher
+extern void NeopoolMqttShow(bool json);        // JSON export
+extern void CmndNeopoolExec(void);             // console command dispatcher
 
 /*********************************************************************************************
  *  Driver implementation (Tasmota hook table style)
  *  Each case is executed by TasmotaCore() in tasmota.ino
  *********************************************************************************************/
-bool Xdrv123(uint8_t function) {
+bool Xdrv123(uint32_t function) {
   switch (function) {
     case FUNC_INIT: {                    // once at boot
-      NeoPoolInit(RS485_TX_PIN, RS485_RX_PIN);  // Init with defined TX/RX pins
+      // Require user-defined UART pins via Configure Module
+      int tx_pin = Pin(GPIO_SBR_TX);
+      int rx_pin = Pin(GPIO_SBR_RX);
+
+      if (tx_pin >= 0 && rx_pin >= 0) {
+        Serial.begin(19200, SERIAL_8N1, rx_pin, tx_pin);  // Init UART with selected pins
+        NeoPoolInit();                                   // Init NeoPool state machine (uses Serial already)
+      } else {
+        AddLog(LOG_LEVEL_ERROR, PSTR("RS485 driver requires Serial Tx and Serial Rx GPIOs to be set!"));
+      }
       break;
     }
 
-    case FUNC_EVERY_250MS: {            // time-slice scheduler (4 Hz)
+    case FUNC_LOOP: {                   // main loop alternative to FUNC_EVERY_250MS
       NeoPoolPoll();                    // non-blocking Modbus handling
       break;
     }
 
     case FUNC_COMMAND: {                // triggered from console / MQTT cmnd
-      return CmndNeopoolExec();         // "NP <args>" family lives in sensor file
+      CmndNeopoolExec();                // "NP <args>" family lives in sensor file
+      return false;
     }
 
     case FUNC_JSON_APPEND: {            // when Tasmota builds tele/STATE JSON
-      return NeopoolMqttShow(true);     // append {"NeoPool":{…}}
+      NeopoolMqttShow(true);            // append {"NeoPool":{…}}
+      return false;
     }
 
     default:
